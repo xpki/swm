@@ -1,4 +1,4 @@
-/* mywm.c - Minimal X11 window manager */
+/* mywm.c - Minimal X11 window manager with focus, layout toggle, kill */
 
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <stdio.h>
 
-/* Arg and Key definitions must go before including config.h */
+/* --- Types --- */
 typedef struct {
     const void *v;
 } Arg;
@@ -15,6 +15,10 @@ typedef struct {
 void spawn(const void *arg);
 void quit(const void *arg);
 void toggle_layout(const void *arg);
+void killclient(const void *arg);
+void focusnext(const void *arg);
+void focusprev(const void *arg);
+void arrange(void);
 
 typedef struct {
     unsigned int mod;
@@ -30,13 +34,15 @@ typedef struct Client {
     struct Client *next;
 } Client;
 
+/* --- Globals --- */
 Display *dpy;
 Window root;
 Client *clients = NULL;
-int borderpx = 2;  // border width
+Client *sel = NULL;  // currently focused window
 
 enum { LAYOUT_HORIZ = 0, LAYOUT_VERT } layout = LAYOUT_HORIZ;
 
+/* --- Window Management --- */
 void spawn(const void *arg) {
     const Arg *a = arg;
     if (fork() == 0) {
@@ -58,6 +64,45 @@ void toggle_layout(const void *arg) {
     arrange();
 }
 
+void killclient(const void *arg) {
+    Window focused;
+    int revert;
+    XGetInputFocus(dpy, &focused, &revert);
+    if (focused != None && focused != PointerRoot && focused != root) {
+        XKillClient(dpy, focused);
+    }
+}
+
+void focusnext(const void *arg) {
+    if (!sel || !sel->next) {
+        sel = clients;  // wrap to first
+    } else {
+        sel = sel->next;
+    }
+    if (sel) {
+        XSetInputFocus(dpy, sel->win, RevertToPointerRoot, CurrentTime);
+    }
+}
+
+void focusprev(const void *arg) {
+    if (!clients || !sel) return;
+
+    Client *prev = NULL;
+    for (Client *c = clients; c && c != sel; c = c->next)
+        prev = c;
+
+    if (prev) {
+        sel = prev;
+    } else {
+        for (Client *c = clients; c; c = c->next)
+            sel = c;  // last one
+    }
+
+    if (sel) {
+        XSetInputFocus(dpy, sel->win, RevertToPointerRoot, CurrentTime);
+    }
+}
+
 void arrange(void) {
     int x = 0, y = 0;
     int w = DisplayWidth(dpy, DefaultScreen(dpy));
@@ -75,7 +120,7 @@ void arrange(void) {
         if (layout == LAYOUT_HORIZ) {
             int ch = h / count;
             XMoveResizeWindow(dpy, c->win, x, y + i * ch, w, ch - borderpx);
-        } else { // LAYOUT_VERT
+        } else {
             int cw = w / count;
             XMoveResizeWindow(dpy, c->win, x + i * cw, y, cw - borderpx, h);
         }
@@ -90,8 +135,10 @@ void manage(Window w) {
     c->next = clients;
     clients = c;
 
+    sel = c;
     XSelectInput(dpy, w, EnterWindowMask | FocusChangeMask);
     XMapWindow(dpy, w);
+    XSetInputFocus(dpy, w, RevertToPointerRoot, CurrentTime);
     arrange();
 }
 
@@ -101,6 +148,7 @@ void unmanage(Window w) {
         if ((*pc)->win == w) {
             Client *tmp = *pc;
             *pc = tmp->next;
+            if (sel == tmp) sel = clients;  // update focus
             free(tmp);
             break;
         }
