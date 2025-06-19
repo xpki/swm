@@ -14,6 +14,7 @@ typedef struct {
 
 void spawn(const void *arg);
 void quit(const void *arg);
+void toggle_layout(const void *arg);
 
 typedef struct {
     unsigned int mod;
@@ -32,6 +33,9 @@ typedef struct Client {
 Display *dpy;
 Window root;
 Client *clients = NULL;
+int borderpx = 2;  // border width
+
+enum { LAYOUT_HORIZ = 0, LAYOUT_VERT } layout = LAYOUT_HORIZ;
 
 void spawn(const void *arg) {
     const Arg *a = arg;
@@ -49,20 +53,34 @@ void quit(const void *arg) {
     exit(0);
 }
 
+void toggle_layout(const void *arg) {
+    layout = (layout == LAYOUT_HORIZ) ? LAYOUT_VERT : LAYOUT_HORIZ;
+    arrange();
+}
+
 void arrange(void) {
     int x = 0, y = 0;
     int w = DisplayWidth(dpy, DefaultScreen(dpy));
     int h = DisplayHeight(dpy, DefaultScreen(dpy));
     int count = 0;
 
-    for (Client *c = clients; c; c = c->next) count++;
-    if (count == 0) return;
+    for (Client *c = clients; c; c = c->next)
+        count++;
+
+    if (count == 0)
+        return;
 
     int i = 0;
     for (Client *c = clients; c; c = c->next, i++) {
-        int ch = h / count;
-        XMoveResizeWindow(dpy, c->win, x, y + i * ch, w, ch - borderpx);
+        if (layout == LAYOUT_HORIZ) {
+            int ch = h / count;
+            XMoveResizeWindow(dpy, c->win, x, y + i * ch, w, ch - borderpx);
+        } else { // LAYOUT_VERT
+            int cw = w / count;
+            XMoveResizeWindow(dpy, c->win, x + i * cw, y, cw - borderpx, h);
+        }
     }
+    XFlush(dpy);
 }
 
 void manage(Window w) {
